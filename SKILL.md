@@ -1,13 +1,13 @@
 ---
 name: adaptive-agents-md
-description: Create or update a repository-root `AGENTS.md` by first inspecting the current repo, classifying whether it is empty, experimental, or mature, asking only the missing high-value questions, then proposing a write plan before creating `AGENTS.md` and optional `log/` plus `knowledge/` scaffolding. Use when a user wants repo-specific agent instructions, personal workflow conventions, or bootstrapped logging and knowledge directories for the current repository.
+description: Create or update a repository-root `AGENTS.md` by first inspecting the current repo, classifying whether it is empty, competition, experimental, or mature, showing that judgement and waiting for user confirmation or correction, then asking only the missing high-value questions before proposing a write plan and optional `log/` plus `knowledge/` scaffolding. Use when a user wants repo-specific agent instructions, personal workflow conventions, or bootstrapped logging and knowledge directories for the current repository.
 ---
 
 # Adaptive AGENTS MD
 
 ## Overview
 
-Use this skill to generate a Chinese `AGENTS.md` that starts with the user's personal habits and then adds concise, repo-specific operating guidance. Do not write the file directly from intuition: inspect first, ask only the missing questions, show a write plan, and wait for confirmation before mutating the target repository.
+Use this skill to generate a Chinese `AGENTS.md` that starts with the user's personal habits and then adds concise, repo-specific operating guidance. Do not write the file directly from intuition: inspect first, present your initial judgement, wait for the user to confirm or correct that judgement, then ask only the missing questions, show a write plan, and wait for confirmation before mutating the target repository.
 
 ## Workflow
 
@@ -16,17 +16,23 @@ Use this skill to generate a Chinese `AGENTS.md` that starts with the user's per
    ```bash
    python3 scripts/build_agents.py analyze /path/to/repo
    ```
-   - This scores the repo on `完整度 / 稳定性 / 规则清晰度`, labels it as closer to empty, experimental, or mature, and returns the first round of high-value questions.
+   - This scores the repo on `完整度 / 稳定性 / 规则清晰度`, labels it as closer to empty, competition, experimental, or mature, and returns the first confirmation question.
 
-2. Ask only the missing questions.
+2. Confirm the initial judgement before any follow-up questions.
+   - Always show the inferred repo type plus the evidence first.
+   - Wait for the user to confirm or correct the type.
+   - If the user says the judgement is wrong, switch to the corrected type before asking anything else.
+
+3. Ask only the missing questions after the type is confirmed.
    - Ask 1-3 questions per round.
    - Respect the analyzer's first priority:
      - Empty repo: ask for project goal and expected output.
+     - Competition repo: ask for competition context, submission form, and important constraints.
      - Experimental repo: ask for experiment goal and stop condition.
      - Mature repo: ask for existing conventions and conflicts with the user's habits.
    - If a critical answer is missing, stop. Do not silently assume it.
 
-3. Build a plan before any write.
+4. Build a plan before any write.
    - Convert the user's answers into `--answer key=value` flags and run:
    ```bash
    python3 scripts/build_agents.py plan /path/to/repo --answer key=value
@@ -37,14 +43,14 @@ Use this skill to generate a Chinese `AGENTS.md` that starts with the user's per
      - scaffold files that would be created if approved
      - the `AGENTS.md` draft
 
-4. Write `AGENTS.md` only after explicit confirmation.
+5. Write `AGENTS.md` only after explicit confirmation.
    - Run:
    ```bash
    python3 scripts/build_agents.py write /path/to/repo --answer key=value
    ```
    - This writes only `AGENTS.md`.
 
-5. Bootstrap `log/` and `knowledge/` only after explicit confirmation.
+6. Bootstrap `log/` and `knowledge/` only after explicit confirmation.
    - Preview:
    ```bash
    python3 scripts/bootstrap_scaffold.py plan /path/to/repo
@@ -105,7 +111,7 @@ python3 scripts/build_agents.py write /path/to/repo --answer project_goal="..." 
 
 Exit behavior:
 
-- `analyze`: returns repo facts plus the current question set.
+- `analyze`: returns repo facts plus the current confirmation or question set.
 - `plan`: renders a write plan and draft; exits non-zero if critical answers are missing.
 - `write`: writes `AGENTS.md`; exits non-zero if critical answers are missing.
 

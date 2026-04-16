@@ -52,6 +52,68 @@ TEST_DIR_CANDIDATES = {"test", "tests", "__tests__"}
 DOC_DIR_CANDIDATES = {"docs", "doc", "notes", "knowledge"}
 ARTIFACT_DIR_CANDIDATES = {"dist", "build", "out", "output", "artifacts", "reports", "coverage"}
 EXPERIMENT_KEYWORDS = {"experiment", "prototype", "sandbox", "spike", "poc", "demo", "trial"}
+COMPETITION_KEYWORDS = {
+    "competition",
+    "contest",
+    "hackathon",
+    "kaggle",
+    "challenge",
+    "比赛",
+    "竞赛",
+    "赛题",
+    "赛道",
+    "挑战赛",
+    "黑客松",
+    "算法赛",
+}
+PROFILE_LABELS = {
+    "empty": "空仓库",
+    "competition": "比赛仓库",
+    "experimental": "实验仓库",
+    "mature": "成熟仓库",
+}
+PROFILE_ALIASES = {
+    "empty": {"empty", "blank", "starter", "空仓库", "空项目", "新仓库", "初始化仓库"},
+    "competition": {
+        "competition",
+        "contest",
+        "hackathon",
+        "kaggle",
+        "challenge",
+        "比赛",
+        "竞赛",
+        "赛题",
+        "赛道",
+        "挑战赛",
+        "黑客松",
+    },
+    "experimental": {
+        "experimental",
+        "experiment",
+        "prototype",
+        "sandbox",
+        "poc",
+        "spike",
+        "demo",
+        "实验",
+        "试验",
+        "原型",
+        "探索",
+    },
+    "mature": {
+        "mature",
+        "production",
+        "stable",
+        "maintained",
+        "成熟",
+        "正式",
+        "生产",
+        "稳定",
+        "长期维护",
+    },
+}
+CONFIRM_WORDS = {"confirm", "confirmed", "yes", "y", "ok", "对", "是", "正确", "可以", "没问题"}
+NEGATIVE_WORDS = {"no", "not", "wrong", "不对", "不是", "不准确", "不太对", "有误"}
 PERSONAL_HABITS = """## 个人习惯
 
 - 所有进入仓库的有效会话都要记录到 `log/YYYY-MM-DD.md`。
@@ -130,6 +192,95 @@ def extract_readme_summary(readmes: list[Path]) -> tuple[str | None, str | None]
         if title or summary:
             return title, summary
     return None, None
+
+
+def extract_keyword_hits(samples: str, keywords: set[str]) -> set[str]:
+    hits = set()
+    lowered = samples.lower()
+    for keyword in keywords:
+        needle = keyword.lower()
+        if needle in lowered:
+            hits.add(keyword)
+    return hits
+
+
+def profile_label(profile: str) -> str:
+    return PROFILE_LABELS.get(profile, profile)
+
+
+def detect_profile_from_text(text: str) -> str | None:
+    lowered = text.strip().lower()
+    for profile in ("competition", "experimental", "mature", "empty"):
+        for alias in PROFILE_ALIASES[profile]:
+            if alias.lower() in lowered:
+                return profile
+    return None
+
+
+def resolve_profile_confirmation(raw_value: str | None, suggested_profile: str) -> dict:
+    if not raw_value or not raw_value.strip():
+        return {
+            "is_resolved": False,
+            "effective_profile": suggested_profile,
+            "raw_value": raw_value or "",
+            "note": "还没有用户确认当前判断。",
+        }
+
+    value = raw_value.strip()
+    lowered = value.lower()
+    override = detect_profile_from_text(value)
+    has_negative = any(word in lowered for word in NEGATIVE_WORDS)
+    has_confirm = any(word in lowered for word in CONFIRM_WORDS)
+
+    if override:
+        note = (
+            "用户接受了当前判断。"
+            if override == suggested_profile
+            else f"用户将仓库类型从 {profile_label(suggested_profile)} 修正为 {profile_label(override)}。"
+        )
+        return {
+            "is_resolved": True,
+            "effective_profile": override,
+            "raw_value": value,
+            "note": note,
+        }
+
+    if has_confirm and not has_negative:
+        return {
+            "is_resolved": True,
+            "effective_profile": suggested_profile,
+            "raw_value": value,
+            "note": "用户接受了当前判断。",
+        }
+
+    if has_negative:
+        return {
+            "is_resolved": False,
+            "effective_profile": suggested_profile,
+            "raw_value": value,
+            "note": "用户否认了当前判断，但还没有给出可解析的新类型。",
+        }
+
+    return {
+        "is_resolved": True,
+        "effective_profile": suggested_profile,
+        "raw_value": value,
+        "note": "用户补充了说明，但没有改动当前判断。",
+    }
+
+
+def build_profile_confirmation_prompt(suggested_profile: str, facts: dict, confirmation: dict) -> str:
+    evidence_preview = "；".join(facts["evidence"][:2]) if facts["evidence"] else "当前证据较少"
+    if confirmation["raw_value"] and not confirmation["is_resolved"]:
+        return (
+            f"我初步判断这更像 `{profile_label(suggested_profile)}`，依据是：{evidence_preview}。"
+            "你刚才否认了这个判断，但还没有给出更贴近的类型。"
+            "请直接确认，或者明确纠正为 `empty / competition / experimental / mature` 中更贴近的一种，并补一句原因。"
+        )
+    return (
+        f"我初步判断这更像 `{profile_label(suggested_profile)}`，依据是：{evidence_preview}。"
+        "这个判断对吗？如果不对，请直接纠正为 `empty / competition / experimental / mature` 中更贴近的一种，并补一句原因。"
+    )
 
 
 def parse_package_commands(path: Path) -> list[dict[str, str]]:
@@ -268,7 +419,7 @@ def collect_repo_facts(repo: Path) -> dict:
     test_dirs = [name for name in top_dirs if name in TEST_DIR_CANDIDATES]
     doc_dirs = [name for name in top_dirs if name in DOC_DIR_CANDIDATES]
 
-    keyword_hits = set()
+    readme_body_samples = " ".join(safe_read_text(path)[:2000] for path in readmes[:2])
     joined_samples = " ".join(
         [
             repo.name.lower(),
@@ -276,11 +427,11 @@ def collect_repo_facts(repo: Path) -> dict:
             summary.lower() if summary else "",
             " ".join(top_dirs).lower(),
             " ".join(relative(path, repo).lower() for path in readmes[:2]),
+            readme_body_samples.lower(),
         ]
     )
-    for keyword in EXPERIMENT_KEYWORDS:
-        if keyword in joined_samples:
-            keyword_hits.add(keyword)
+    experiment_hits = extract_keyword_hits(joined_samples, EXPERIMENT_KEYWORDS)
+    competition_hits = extract_keyword_hits(joined_samples, COMPETITION_KEYWORDS)
 
     completeness = 0
     completeness += 15 if readmes else 0
@@ -300,7 +451,7 @@ def collect_repo_facts(repo: Path) -> dict:
     stability += 10 if rules else 0
     stability += 10 if artifact_dirs else 0
     stability += 10 if file_count >= 50 else 0
-    stability -= 25 if keyword_hits else 0
+    stability -= 25 if experiment_hits else 0
     stability -= 10 if file_count < 10 else 0
     stability = max(0, min(100, stability))
 
@@ -315,6 +466,8 @@ def collect_repo_facts(repo: Path) -> dict:
 
     if completeness < 20 and file_count <= 5 and not any(manifests.values()) and not rules:
         repo_profile = "empty"
+    elif competition_hits:
+        repo_profile = "competition"
     elif (
         (stability >= 55 and completeness >= 60)
         or (any(path.name == "AGENTS.md" for path in rules) and completeness >= 60)
@@ -355,8 +508,10 @@ def collect_repo_facts(repo: Path) -> dict:
         evidence.append(f"关键源码目录：{', '.join(source_dirs)}")
     if test_dirs:
         evidence.append(f"测试目录：{', '.join(test_dirs)}")
-    if keyword_hits:
-        evidence.append(f"命中实验性关键词：{', '.join(sorted(keyword_hits))}")
+    if competition_hits:
+        evidence.append(f"命中比赛关键词：{', '.join(sorted(competition_hits))}")
+    if experiment_hits:
+        evidence.append(f"命中实验性关键词：{', '.join(sorted(experiment_hits))}")
     if not evidence:
         evidence.append("未发现足够多的仓库特征文件，当前更接近空仓库。")
 
@@ -395,13 +550,32 @@ def collect_repo_facts(repo: Path) -> dict:
             "rule_clarity": rule_clarity,
         },
         "profile": repo_profile,
+        "profile_label": profile_label(repo_profile),
         "evidence": evidence,
+        "competition_hits": sorted(competition_hits),
+        "experiment_hits": sorted(experiment_hits),
         "sources": sources,
     }
 
 
-def question_spec(profile: str, facts: dict, answers: dict[str, str]) -> list[dict[str, str]]:
+def question_spec(
+    suggested_profile: str,
+    effective_profile: str,
+    facts: dict,
+    answers: dict[str, str],
+    confirmation: dict,
+) -> list[dict[str, str]]:
     specs: list[dict[str, str]] = []
+    if not confirmation["is_resolved"]:
+        return [
+            {
+                "id": "repo_profile_confirmation",
+                "prompt": build_profile_confirmation_prompt(suggested_profile, facts, confirmation),
+                "why": "先确认仓库性质，再继续追问细节，避免把比赛仓库误当成实验仓库。",
+            }
+        ]
+
+    profile = effective_profile
     if profile == "empty":
         if "project_goal" not in answers:
             specs.append(
@@ -425,6 +599,31 @@ def question_spec(profile: str, facts: dict, answers: dict[str, str]) -> list[di
                     "id": "tech_stack",
                     "prompt": "如果你已经有倾向，请补一句计划使用的技术栈或主要语言。",
                     "why": "空仓库没有清单文件时，这能帮助补足最小的仓库事实。",
+                }
+            )
+    elif profile == "competition":
+        if "competition_context" not in answers:
+            specs.append(
+                {
+                    "id": "competition_context",
+                    "prompt": "这是哪个比赛、赛题或赛道？请用一句话说明当前仓库对应的比赛背景。",
+                    "why": "比赛仓库需要先明确赛事上下文，避免误套实验项目的话术。",
+                }
+            )
+        if "submission_form" not in answers:
+            specs.append(
+                {
+                    "id": "submission_form",
+                    "prompt": "这次比赛最终要提交什么？例如代码、模型、报告、演示或组合交付。",
+                    "why": "交付形态会直接影响 `AGENTS.md` 里关于目录、产物和日志沉淀的要求。",
+                }
+            )
+        if "competition_constraints" not in answers:
+            specs.append(
+                {
+                    "id": "competition_constraints",
+                    "prompt": "这次比赛有没有特别重要的限制或评分重点？例如截止时间、格式、评测指标、禁止事项。",
+                    "why": "这些约束通常比通用工程习惯更重要，应该优先写进仓库说明。",
                 }
             )
     elif profile == "experimental":
@@ -456,16 +655,22 @@ def question_spec(profile: str, facts: dict, answers: dict[str, str]) -> list[di
     return specs[:3]
 
 
-def required_answer_ids(profile: str) -> list[str]:
+def required_answer_ids(profile: str, confirmation: dict) -> list[str]:
+    if not confirmation["is_resolved"]:
+        return ["repo_profile_confirmation"]
     if profile == "empty":
-        return ["project_goal", "expected_output"]
+        return ["repo_profile_confirmation", "project_goal", "expected_output"]
+    if profile == "competition":
+        return ["repo_profile_confirmation", "competition_context", "submission_form"]
     if profile == "experimental":
-        return ["experiment_goal", "stop_condition"]
-    return ["convention_conflicts"]
+        return ["repo_profile_confirmation", "experiment_goal", "stop_condition"]
+    return ["repo_profile_confirmation", "convention_conflicts"]
 
 
-def missing_required_answers(profile: str, answers: dict[str, str]) -> list[str]:
-    return [answer_id for answer_id in required_answer_ids(profile) if not answers.get(answer_id)]
+def missing_required_answers(profile: str, answers: dict[str, str], confirmation: dict) -> list[str]:
+    if not confirmation["is_resolved"]:
+        return ["repo_profile_confirmation"]
+    return [answer_id for answer_id in required_answer_ids(profile, confirmation) if not answers.get(answer_id)]
 
 
 def parse_answers(raw_answers: list[str]) -> dict[str, str]:
@@ -493,9 +698,10 @@ def format_commands(commands: list[dict[str, str]]) -> list[str]:
 def render_repo_overview(facts: dict, answers: dict[str, str]) -> list[str]:
     lines = ["### 仓库概览"]
     summary_bits = []
+    current_profile = facts.get("effective_profile", facts["profile"])
     if facts["purpose"]:
         summary_bits.append(facts["purpose"])
-    elif facts["profile"] == "empty":
+    if current_profile == "empty":
         goal = answers.get("project_goal")
         output = answers.get("expected_output")
         if goal:
@@ -504,7 +710,14 @@ def render_repo_overview(facts: dict, answers: dict[str, str]) -> list[str]:
             summary_bits.append(f"预期交付：{output}")
         if answers.get("tech_stack"):
             summary_bits.append(f"计划技术栈：{answers['tech_stack']}")
-    elif facts["profile"] == "experimental":
+    elif current_profile == "competition":
+        if answers.get("competition_context"):
+            summary_bits.append(f"比赛背景：{answers['competition_context']}")
+        if answers.get("submission_form"):
+            summary_bits.append(f"提交物：{answers['submission_form']}")
+        if answers.get("competition_constraints"):
+            summary_bits.append(f"关键约束：{answers['competition_constraints']}")
+    elif current_profile == "experimental":
         goal = answers.get("experiment_goal")
         stop = answers.get("stop_condition")
         if goal:
@@ -658,7 +871,8 @@ def render_plan(repo: Path, facts: dict, answers: dict[str, str], draft: str) ->
         "# AGENTS 生成计划",
         "",
         "## 仓库判断",
-        f"- 类型：`{facts['profile']}`",
+        f"- 初步判断：`{facts['profile']}`（{profile_label(facts['profile'])}）",
+        f"- 当前采用：`{facts['effective_profile']}`（{profile_label(facts['effective_profile'])}）",
         f"- 完整度：`{facts['scores']['completeness']}`",
         f"- 稳定性：`{facts['scores']['stability']}`",
         f"- 规则清晰度：`{facts['scores']['rule_clarity']}`",
@@ -667,6 +881,8 @@ def render_plan(repo: Path, facts: dict, answers: dict[str, str], draft: str) ->
     ]
     for item in facts["evidence"]:
         lines.append(f"- {item}")
+    lines.extend(["", "## 判断确认"])
+    lines.append(f"- {facts['confirmation_note']}")
     lines.extend(["", "## 将写入的文件", "- `AGENTS.md`", "", "## 可能创建的脚手架"])
     for item in scaffold_plan(facts):
         lines.append(f"- {item}")
@@ -688,16 +904,23 @@ def render_plan(repo: Path, facts: dict, answers: dict[str, str], draft: str) ->
 
 def build_analysis(repo: Path, answers: dict[str, str]) -> dict:
     facts = collect_repo_facts(repo)
-    questions = question_spec(facts["profile"], facts, answers)
+    confirmation = resolve_profile_confirmation(answers.get("repo_profile_confirmation"), facts["profile"])
+    effective_profile = confirmation["effective_profile"]
+    facts["effective_profile"] = effective_profile
+    facts["effective_profile_label"] = profile_label(effective_profile)
+    facts["confirmation_note"] = confirmation["note"]
+    questions = question_spec(facts["profile"], effective_profile, facts, answers, confirmation)
     return {
         "repo": str(repo),
         "profile": facts["profile"],
+        "effective_profile": effective_profile,
         "scores": facts["scores"],
         "evidence": facts["evidence"],
         "sources": facts["sources"],
+        "confirmation": confirmation,
         "questions": questions,
-        "required_answer_ids": required_answer_ids(facts["profile"]),
-        "missing_required_answers": missing_required_answers(facts["profile"], answers),
+        "required_answer_ids": required_answer_ids(effective_profile, confirmation),
+        "missing_required_answers": missing_required_answers(effective_profile, answers, confirmation),
         "facts": facts,
     }
 
@@ -711,7 +934,8 @@ def print_analysis(analysis: dict, as_json: bool) -> None:
         "# 仓库探测结果",
         "",
         f"- 仓库：`{analysis['repo']}`",
-        f"- 类型：`{analysis['profile']}`",
+        f"- 初步判断：`{analysis['profile']}`（{profile_label(analysis['profile'])}）",
+        f"- 当前采用：`{analysis['effective_profile']}`（{profile_label(analysis['effective_profile'])}）",
         f"- 完整度：`{analysis['scores']['completeness']}`",
         f"- 稳定性：`{analysis['scores']['stability']}`",
         f"- 规则清晰度：`{analysis['scores']['rule_clarity']}`",
@@ -724,6 +948,8 @@ def print_analysis(analysis: dict, as_json: bool) -> None:
     lines.append(f"- 顶层目录：{', '.join(facts['top_dirs']) or '无'}")
     lines.append(f"- 规则入口：{', '.join(facts['rules']) or '无'}")
     lines.append(f"- 清单文件：{', '.join(name for name, paths in facts['manifests'].items() if paths) or '无'}")
+    lines.extend(["", "## 先确认这个判断"])
+    lines.append(f"- {analysis['confirmation']['note']}")
     lines.extend(["", "## 当前建议问题"])
     if analysis["questions"]:
         for item in analysis["questions"]:
