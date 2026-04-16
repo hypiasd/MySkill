@@ -1,0 +1,4 @@
+interface:
+  display_name: "Adaptive Repo AGENTS"
+  short_description: "Create adaptive AGENTS.md and repo scaffolding"
+  default_prompt: "Use $adaptive-agents-md to inspect the current repository, ask only the missing questions, and propose or create an AGENTS.md plus log/knowledge scaffolding."
