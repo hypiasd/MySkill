@@ -1,81 +1,138 @@
 ---
 name: adaptive-agents-md
-description: Create or update a repository-root `AGENTS.md` by first inspecting the current repo, classifying whether it is empty, competition, experimental, or mature, showing that judgement and waiting for user confirmation or correction, then asking only the missing high-value questions before proposing a write plan and optional `log/` plus `knowledge/` scaffolding. Use when a user wants repo-specific agent instructions, personal workflow conventions, or bootstrapped logging and knowledge directories for the current repository.
+description: "Create or update a repository-root `AGENTS.md` in a pure LLM flow: inspect repo facts first, infer empty/competition/experimental/mature profile, ask for profile confirmation, ask only missing high-value questions, then show a write plan and wait for confirmation before writing `AGENTS.md` or scaffolding `log/` and `knowledge/`."
 ---
 
 # Adaptive AGENTS MD
 
 ## Overview
 
-Use this skill to generate a Chinese `AGENTS.md` that starts with the user's personal habits and then adds concise, repo-specific operating guidance. Do not write the file directly from intuition: inspect first, present your initial judgement, wait for the user to confirm or correct that judgement, then ask only the missing questions, show a write plan, and wait for confirmation before mutating the target repository.
+Use this skill to generate or update a Chinese `AGENTS.md` for the current repository.
 
-## Workflow
+This skill is pure LLM: do not depend on local scripts. The required protocol is:
 
-1. Inspect the repository first.
-   - Run:
-   ```bash
-   python3 scripts/build_agents.py analyze /path/to/repo
-   ```
-   - This scores the repo on `完整度 / 稳定性 / 规则清晰度`, labels it as closer to empty, competition, experimental, or mature, and returns the first confirmation question.
+1. inspect first,
+2. show initial repo-type judgement and evidence,
+3. wait for confirmation or correction,
+4. ask only missing high-value questions,
+5. show write plan,
+6. write only after explicit confirmation.
 
-2. Confirm the initial judgement before any follow-up questions.
-   - Always show the inferred repo type plus the evidence first.
-   - Wait for the user to confirm or correct the type.
-   - If the user says the judgement is wrong, switch to the corrected type before asking anything else.
+This protocol belongs to the skill behavior only. Do not copy the protocol text into the final `AGENTS.md`.
 
-3. Ask only the missing questions after the type is confirmed.
-   - Ask 1-3 questions per round.
-   - Respect the analyzer's first priority:
-     - Empty repo: ask for project goal and expected output.
-     - Competition repo: ask for competition context, submission form, and important constraints.
-     - Experimental repo: ask for experiment goal and stop condition.
-     - Mature repo: ask for existing conventions and conflicts with the user's habits.
-   - If a critical answer is missing, stop. Do not silently assume it.
+## LLM-Native Protocol (Script-Free)
 
-4. Build a plan before any write.
-   - Convert the user's answers into `--answer key=value` flags and run:
-   ```bash
-   python3 scripts/build_agents.py plan /path/to/repo --answer key=value
-   ```
-   - Show the resulting plan to the user before writing. The plan lists:
-     - repo classification and evidence
-     - files that will be written
-     - scaffold files that would be created if approved
-     - the `AGENTS.md` draft
+### 1) Inspect repository facts first
 
-5. Write `AGENTS.md` only after explicit confirmation.
-   - Run:
-   ```bash
-   python3 scripts/build_agents.py write /path/to/repo --answer key=value
-   ```
-   - This writes only `AGENTS.md`.
+Inspect directly with normal repo exploration (`rg --files`, directory listing, focused file reads). Prioritize:
 
-6. Bootstrap `log/` and `knowledge/` only after explicit confirmation.
-   - Preview:
-   ```bash
-   python3 scripts/bootstrap_scaffold.py plan /path/to/repo
-   ```
-   - Apply:
-   ```bash
-   python3 scripts/bootstrap_scaffold.py write /path/to/repo
-   ```
+- `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `RULES.md`
+- `README*`
+- manifest/build files such as `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Makefile`
+- existing `log/`, `knowledge/`, `docs/`, `notes/` directories
 
-## Personal Habits To Embed
+Collect concrete facts only (modules, commands, outputs, constraints, existing rules).
 
-Always render the `## 个人习惯` section exactly around these repo-level conventions instead of generic agent advice:
+Hard rule:
 
-- Record every meaningful repository session in `log/YYYY-MM-DD.md`.
-- Use Markdown logs and append by date instead of creating arbitrary filenames.
-- Keep each log entry concrete: `任务`、`动作`、`结果`、`反思`，and add `下一步` when useful.
-- Before creating `log/` or any log file, tell the user which files will be created and wait for confirmation.
-- When the work produces reusable conclusions, pitfalls, command recipes, or option comparisons, write them into `knowledge/<topic>.md`.
-- Before creating `knowledge/` or any knowledge file, tell the user which files will be created and wait for confirmation.
+- Do not call local `scripts/*.py`.
+- Do not require users to pass `--answer` style CLI inputs.
+- Keep all reasoning and questioning in natural conversation.
 
-Do not replace these habits with generic wording such as "communicate clearly" or "be safe". Those are baseline agent abilities, not the user's personal repo conventions.
+### 2) Score and classify before asking broad questions
 
-## AGENTS.md Shape
+Score the repo along:
 
-Generate a concise Chinese document with this fixed high-level structure:
+- `完整度`
+- `稳定性`
+- `规则清晰度`
+
+Then infer the closest profile:
+
+- `empty`
+- `competition`
+- `experimental`
+- `mature`
+
+When reporting the judgement, always include:
+
+- inferred type
+- 2-5 concrete evidence points
+- short confidence note
+
+### 3) Confirm or correct repo type first
+
+Before any follow-up questions, ask for repo-type confirmation.
+
+Rules:
+
+- If user confirms, continue with that type.
+- If user corrects, switch to corrected type immediately.
+- If user is uncertain or ambiguous, stay in confirmation step and ask one concise clarification.
+- Do not treat arbitrary non-empty replies as confirmation.
+
+### 4) Ask only missing high-value questions (1-3 per round)
+
+After profile confirmation, ask only what is still missing. Keep each round to 1-3 questions.
+
+First-priority question focus:
+
+- Empty repo: project goal + expected output
+- Competition repo: competition context + submission form + hard constraints
+- Experimental repo: experiment goal + stop condition
+- Mature repo: existing conventions + conflict points with personal habits
+
+If critical answers are still missing, stop and ask; do not silently assume.
+
+### 5) Show write plan before any mutation
+
+Before writing anything, show a concrete plan containing:
+
+- files to create/update
+- why each change is needed (repo facts or user answers)
+- whether `log/` / `knowledge/` scaffolding will be created
+- exact scaffold paths
+- a concise preview of `AGENTS.md` structure
+
+Then wait for explicit confirmation.
+
+### 6) Write in two confirmation gates
+
+Gate A:
+
+- create/update `AGENTS.md` only after explicit confirmation.
+
+Gate B:
+
+- create scaffold files (`log/`, `knowledge/`) only after explicit confirmation.
+
+Do not auto-create scaffolding without that second confirmation.
+
+## Personal Habits To Embed (Fixed Contract)
+
+`## 个人习惯` is fixed to the user's concrete conventions; do not infer it from repo content.
+
+Must include:
+
+- every meaningful repository session is logged
+- log path default: `log/YYYY-MM-DD.md`
+- log format: Markdown; append by date
+- each log entry includes at least: `时间`、`任务`、`动作`、`结果`、`反思` (and `下一步` when useful)
+- before creating missing `log/` files, first show creation plan, then create after confirmation
+- reusable conclusions/pitfalls/command recipes/option comparisons are captured in `knowledge/KNOWLEDGE.md`
+- one repository uses one knowledge file (do not split into many files)
+- knowledge structure stays as `总览索引 + 主题分组`
+- theme classification should be coarse and adaptive, and synonym themes should be merged to avoid fragmentation (for example `RAG` and `检索链路`)
+- each knowledge entry includes `背景`、`结论`、`证据 / 命令`、`决策`、`未决问题` plus a related log reference
+- before creating missing `knowledge/` files, first show creation plan, then create after confirmation
+
+Explicitly forbid filler text in this section:
+
+- generic agent common sense such as “保持沟通 / 注意安全 / 先理解需求”
+
+## AGENTS.md Output Shape
+
+Always produce:
 
 ```markdown
 # AGENTS
@@ -89,55 +146,57 @@ Generate a concise Chinese document with this fixed high-level structure:
 
 Rules for `## 仓库说明`:
 
-- Include only repo facts that can be grounded in discovered files or in the user's answers.
-- Prefer concise sections such as repo purpose, key directories, commands, rule entrypoints, and artifact locations.
-- If the repo lacks enough evidence, keep the section short rather than padding it with generic advice.
-- If `AGENTS.md` already exists, preserve useful repo-specific guidance and merge the personal habits section in front.
-- If older guidance uses headings, keep it readable by nesting it under the new `## 仓库说明` section rather than pasting it as a second full document.
+- include only facts grounded in repository evidence or user answers
+- keep it concise and practical:
+  - repo purpose / module overview
+  - key directories
+  - start/build/test/check commands
+  - rule entry files
+  - delivery/artifact locations
+- avoid generic padding language
+- if existing `AGENTS.md` exists, do not overwrite wholesale; merge and refine useful repo-specific content
+- if only `CLAUDE.md` / `.cursorrules` / `RULES.md` exist, extract repo-factual parts into `仓库说明`
 
-## Bundled Scripts
+## Merge and Scaffold Strategy
 
-### `scripts/build_agents.py`
+When no `AGENTS.md` exists:
 
-Use this for repo inspection, missing-question generation, plan rendering, draft generation, and final `AGENTS.md` writes.
+- create a new Chinese `AGENTS.md`
+- put `个人习惯` first
+- generate concise `仓库说明` from facts
 
-Commands:
+When `AGENTS.md` already exists:
 
-```bash
-python3 scripts/build_agents.py analyze /path/to/repo
-python3 scripts/build_agents.py plan /path/to/repo --answer project_goal="..."
-python3 scripts/build_agents.py write /path/to/repo --answer project_goal="..." --answer expected_output="..."
-```
+- do not replace the whole page
+- insert or update `个人习惯` near the front
+- preserve useful existing repo guidance
+- deduplicate and merge old content into cleaner concise sections
 
-Exit behavior:
-
-- `analyze`: returns repo facts plus the current confirmation or question set.
-- `plan`: renders a write plan and draft; exits non-zero if critical answers are missing.
-- `write`: writes `AGENTS.md`; exits non-zero if critical answers are missing.
-
-### `scripts/bootstrap_scaffold.py`
-
-Use this for deterministic scaffold previews and creation.
-
-Commands:
-
-```bash
-python3 scripts/bootstrap_scaffold.py plan /path/to/repo
-python3 scripts/bootstrap_scaffold.py write /path/to/repo
-```
-
-The scaffold script only manages:
+Scaffold defaults (after confirmation only):
 
 - `log/YYYY-MM-DD.md`
-- `knowledge/TEMPLATE.md`
+- `knowledge/KNOWLEDGE.md`
 
-It is intentionally narrow so the agent can tell the user exactly what will be created.
+Suggested default sections:
 
-## Validation
+- Log entry: `时间 / 任务 / 动作 / 结果 / 反思 / 下一步`
+- Knowledge entry: `背景 / 结论 / 证据或命令 / 决策 / 未决问题`
 
-- Validate the skill itself with:
-```bash
-python3 /Users/tian/.codex/skills/.system/skill-creator/scripts/quick_validate.py /Users/tian/.codex/skills/adaptive-agents-md
-```
-- Before trusting a repo draft, run at least one `analyze` pass and one `plan` pass.
-- For existing `AGENTS.md`, inspect the merged draft before `write` so preserved guidance still reads cleanly.
+## Verification Expectations
+
+Recommended smoke checks for this skill behavior:
+
+- empty repo
+- competition/experimental repo
+- mature repo
+- repo with existing `AGENTS.md` or other rules files
+
+Acceptance expectations:
+
+- inspect first, then confirm repo type
+- block when critical answers are missing
+- show plan before write
+- `个人习惯` remains stable
+- `仓库说明` contains only repo facts
+- scaffold creation is always preview-first, confirm-then-write
+- no local command or machine-specific path is required anywhere in the normal workflow

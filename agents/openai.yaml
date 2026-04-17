@@ -1,4 +1,4 @@
 interface:
   display_name: "Adaptive Repo AGENTS"
   short_description: "Create adaptive AGENTS.md and repo scaffolding"
-  default_prompt: "Use $adaptive-agents-md to inspect the current repository, ask only the missing questions, and propose or create an AGENTS.md plus log/knowledge scaffolding."
+  default_prompt: "Use $adaptive-agents-md in pure LLM mode: inspect the current repository first, infer repo type with evidence, ask me to confirm or correct that judgement before any follow-up questions, then ask only missing high-value questions and show a write plan before any file changes. Generate/update AGENTS.md with fixed personal habits plus concise repo facts. Keep one repository-level knowledge file at knowledge/KNOWLEDGE.md with coarse adaptive themes and synonym merging (for example RAG and 检索链路). For missing log/knowledge files, show exact paths first and create only after confirmation. Do not use local skill scripts; run the workflow through conversation only."

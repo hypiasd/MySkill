@@ -1,129 +1,54 @@
 # Adaptive Repo AGENTS
 
-`adaptive-agents-md` 是一个给 Codex 用的 skill，用来为当前仓库生成或更新根目录 `AGENTS.md`。
+`adaptive-agents-md` 是一个给 Codex 用的 skill，用来为“当前仓库”创建或更新根目录 `AGENTS.md`。
 
-它不会一上来就写文件，而是先探测仓库状态，先给出自己的初步判断并等待你确认或纠正，再只问缺失的关键问题，先展示计划，最后在确认后写入 `AGENTS.md`，并按需创建 `log/` 与 `knowledge/` 脚手架。
+默认是 **纯 LLM** 流程：先探测、再判断、先确认、再提问、先给计划、确认后写入。核心流程不依赖本地脚本，也不提供脚本入口。
 
-## 适合什么场景
+## 核心流程
 
-- 空仓库，需要先把 agent 协作规范和个人习惯立起来
-- 比赛仓库，需要围绕赛题、提交物、约束和沉淀方式组织规则
-- 实验仓库，需要围绕实验目标、判停条件、日志和知识沉淀组织规则
-- 成熟仓库，需要保留现有约定，同时把你的个人习惯融合进新的 `AGENTS.md`
-- 已经有 `AGENTS.md`、`RULES.md`、`CLAUDE.md` 或 `.cursorrules`，想做提炼和合并
+1. 先探测仓库事实（规则文件、README、清单文件、关键目录）。
+2. 对 `完整度 / 稳定性 / 规则清晰度` 做连续评分并判断仓库类型（`empty / competition / experimental / mature`）。
+3. 先把“判断 + 依据”告诉你，并等待你确认或纠正。
+4. 仅在类型确认后，再按轮次提 1-3 个缺失的高价值问题。
+5. 关键答案未补齐时停下，不自行假设。
+6. 写入前先展示计划（要改哪些文件、依据是什么、会不会建 `log/` 和 `knowledge/`）。
+7. 你确认后再写 `AGENTS.md`；脚手架也要单独确认后再创建。
 
-## 核心特点
+## 内置个人习惯约定
 
-- 先探测，再确认判断，再提问，再计划，再写入
-- 只问 1-3 个高价值问题，不做大段无关追问
-- 会先说“我判断这更像什么仓库，以及依据是什么”，而不是直接开始盘问
-- 关键答案缺失时直接停下，不靠猜
-- 生成的 `AGENTS.md` 固定分成两段：
-  - `## 个人习惯`
-  - `## 仓库说明`
-- `个人习惯` 是固定的 repo 约定，不会被泛化成空话
-- `仓库说明` 只保留真实仓库信息，不用“保持沟通”“注意安全”之类通用废话填充
+生成的 `AGENTS.md` 前半段固定写这些约定：
 
-## 个人习惯约定
+- 所有有效会话都要记录日志
+- 默认日志路径：`log/YYYY-MM-DD.md`
+- 日志是 Markdown，按日期追加
+- 每条日志至少包含：`时间`、`任务`、`动作`、`结果`、`反思`（需要时加 `下一步`）
+- `log/` 不存在时，先提示计划再创建
+- 可复用结论、踩坑、命令配方、方案比较沉淀到 `knowledge/KNOWLEDGE.md`
+- 一个仓库只维护一个知识文件
+- 知识结构保持“总览索引 + 主题分组”
+- 主题自动归类应保持粗粒度，并合并同义主题避免碎片化（如 `RAG` 与 `检索链路`）
+- 每条知识至少包含：`背景`、`结论`、`证据 / 命令`、`决策`、`未决问题`，并关联日志
+- `knowledge/` 不存在时，先提示计划再创建
 
-这个 skill 会把以下习惯写进生成的 `AGENTS.md`：
+不会写“保持沟通”“注意安全”这类通用废话。
 
-- 所有进入仓库的有效会话都要记录到 `log/YYYY-MM-DD.md`
-- 日志必须使用 Markdown，并按日期文件追加
-- 每条日志至少包含：`任务`、`动作`、`结果`、`反思`
-- 有明确后续时补 `下一步`
-- 可复用的新结论、踩坑、命令配方、方案比较要沉淀到 `knowledge/<topic>.md`
-- 创建 `log/` 或 `knowledge/` 前要先展示计划并等待确认
+## 在 Codex 中使用
 
-## 安装
-
-把这个仓库放到 Codex 的技能目录下：
-
-```bash
-git clone git@github.com:hypiasd/MySkill.git ~/.codex/skills/adaptive-agents-md
-```
-
-如果你已经在本地有这个目录，也可以直接把仓库内容同步进去。
-
-## 在 Codex 里使用
-
-可以直接这样调用：
+示例提示词：
 
 ```text
-Use $adaptive-agents-md to inspect the current repository, ask only the missing questions, and propose an AGENTS.md.
+Use $adaptive-agents-md to inspect the current repository first, show your repo-type judgement with evidence, wait for my confirmation, then ask only missing high-value questions and propose an AGENTS.md write plan.
 ```
 
-如果你想连同脚手架一起做，也可以这样说：
+如果你还希望它同时处理脚手架计划：
 
 ```text
-Use $adaptive-agents-md to inspect this repo, propose AGENTS.md, and tell me what log/knowledge files you would create.
+Use $adaptive-agents-md to inspect this repo, confirm repo type with me first, then propose AGENTS.md changes and list exact log/knowledge files to create before writing anything.
 ```
 
-## 本地脚本
+## 生成结果结构
 
-### 1. 探测仓库
-
-```bash
-python3 scripts/build_agents.py analyze /path/to/repo
-```
-
-作用：
-
-- 读取 `README*`、`AGENTS.md`、`RULES.md`、`CLAUDE.md`、`.cursorrules`
-- 读取常见清单文件，如 `package.json`、`pyproject.toml`、`Cargo.toml`、`go.mod`、`Makefile`
-- 对仓库做连续评分：
-  - `完整度`
-  - `稳定性`
-  - `规则清晰度`
-- 把仓库归到更接近 `empty`、`competition`、`experimental` 或 `mature`
-- 给出当前轮最值得问的 1-3 个问题
-
-### 2. 生成计划
-
-```bash
-python3 scripts/build_agents.py plan /path/to/repo --answer key=value
-```
-
-这个命令会输出：
-
-- 仓库判断
-- 探测依据
-- 将写入的文件
-- 可能创建的脚手架
-- `AGENTS.md` 草稿
-
-如果关键答案没给全，它会直接停下并告诉你还缺什么。
-
-### 3. 写入 `AGENTS.md`
-
-```bash
-python3 scripts/build_agents.py write /path/to/repo --answer key=value
-```
-
-这个命令只写 `AGENTS.md`，不会顺手创建 `log/` 或 `knowledge/`。
-
-### 4. 预览脚手架
-
-```bash
-python3 scripts/bootstrap_scaffold.py plan /path/to/repo
-```
-
-它会列出将创建的内容：
-
-- `log/`
-- `log/YYYY-MM-DD.md`
-- `knowledge/`
-- `knowledge/TEMPLATE.md`
-
-### 5. 创建脚手架
-
-```bash
-python3 scripts/bootstrap_scaffold.py write /path/to/repo
-```
-
-## 生成结果长什么样
-
-生成的 `AGENTS.md` 会是这种结构：
+输出的 `AGENTS.md` 固定是：
 
 ```md
 # AGENTS
@@ -137,9 +62,8 @@ python3 scripts/bootstrap_scaffold.py write /path/to/repo
 
 其中：
 
-- `个人习惯` 固定写你的 repo 约定
-- `仓库说明` 根据当前仓库真实情况生成
-- 如果仓库原本就有 `AGENTS.md`，会保留有价值的仓库约定并合并进去
+- `个人习惯`：固定写你的仓库协作约定
+- `仓库说明`：只写当前仓库真实信息（用途、目录、命令、规则入口、产物位置）
 
 ## 仓库结构
 
@@ -149,20 +73,9 @@ adaptive-agents-md/
 ├── README.md
 ├── agents/
 │   └── openai.yaml
-└── scripts/
-    ├── build_agents.py
-    └── bootstrap_scaffold.py
+└── (no runtime scripts)
 ```
 
-## 验证
+## 可移植性
 
-```bash
-python3 /Users/tian/.codex/skills/.system/skill-creator/scripts/quick_validate.py /Users/tian/.codex/skills/adaptive-agents-md
-```
-
-## 设计原则
-
-- 不把通用 agent 能力误写成“你的个人习惯”
-- 不靠想象补全仓库事实
-- 不在用户没确认前直接创建脚手架
-- 不用空泛措辞填满 `AGENTS.md`
+这个 skill 不要求任何本地脚本命令，也不依赖机器专属绝对路径。复制到任意环境后，直接按对话协议使用即可。
